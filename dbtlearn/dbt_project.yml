@@ -30,3 +30,8 @@ clean-targets: # directories to be removed by `dbt clean`
 # files using the `{{ config(...) }}` macro.
 models:
   dbtlearn:
+    +materialized: view # this is just reinforcing the default behavior of dbt
+    dim:
+      +materialized: table
+    src:
+      +materialized: ephemeral
