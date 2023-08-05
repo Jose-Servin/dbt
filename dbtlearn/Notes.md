@@ -107,3 +107,40 @@ WITH raw_listings AS (
         AIRBNB.raw.raw_listings
 )
 ```
+
+## Seeds and Sources
+
+Our `source.yml` file serves as an abstraction layer on-top of our input data for dbt.
+
+We can check various conditions about the data such as freshness and define references.
+
+To implement:
+
+1. add a `source.yml` file which maps to actual models in our DB.
+
+2. reference these models using `{{ source('airbnb', 'reviews') }}`.
+
+3. run `dbt compile` to make sure there are no source ref errors.
+
+### Source Freshness
+
+Source freshness is checked using a build in dbt function and run command.
+
+1. Define what column in what table to look for "freshness".
+
+In the raw reviews table look at the `date` column and see if any values break the freshness rules defined.
+
+```yml
+
+- name: reviews
+        identifier: raw_reviews
+        loaded_at_field: date
+        freshness:
+          warn_after: { count: 1, period: hour }
+          error_after: { count: 24, period: hour }
+
+```
+
+2. run `dbt source freshness`
+
+![Error message for stale data using dbt source freshness command.](./Notes-SC/source-freshness-error.png)
