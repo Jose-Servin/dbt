@@ -144,3 +144,179 @@ In the raw reviews table look at the `date` column and see if any values break t
 2. run `dbt source freshness`
 
 ![Error message for stale data using dbt source freshness command.](./Notes-SC/source-freshness-error.png)
+
+## Tests
+
+Run with `dbt test` or `dbt test --select <model>`
+
+1. Singular Tests
+
+    SQL queries stored in `tests/` which are expected to return an empty result set.
+2. Generic Test
+
+    * unique
+    * not_null
+    * accepted_values
+    * Relationships
+
+3. dbt packages
+
+### Implementing Generic Tests
+
+Tests are added to our `Model/` directory via the `schema.yml` file. You can execute these test using the `dbt test` command.
+
+We can see the compiled SQL in the `target/compiled/dbtlearn/tests` directory.
+
+### Implementing Singular Tests
+
+These tests live in the `tests/` directory as SQL files.
+
+For example `dim_listings_minimum_nights.sql` checks that there are no minimum nights less than 1. Why? because logically you cannot stay at an AirBnb for less than 1 day.
+
+```sql
+SELECT
+    *
+FROM
+    {{ ref('dim_listings_clean') }}
+WHERE minimum_nights < 1
+LIMIT 10
+```
+
+**Remember, these test should return an empty result set!!!**
+
+### Debugging Test
+
+What to do when a test fails? Debug with compiled SQL.
+
+```terminal
+cat target/compiled/dbtlearn/models/schema.yml/accepted_values_dim_listings_c_710e2a5c95c641691752d7222ba68f46.sql
+```
+
+## Macros, Custom Tests and Packages
+
+* Macros are Jinja templates created in the Macros folder.
+* The special `test` macro can help you implement generic tests.
+
+To create your own test macro, we first create our macro using Jinja:
+
+```jinja
+{% macro no_nulls_in_columns(model) %}
+    SELECT * FROM {{ model }} WHERE
+    {% for col in adapter.get_columns_in_relation(model) -%}
+        {{ col.column }} IS NULL OR
+    {% endfor %}
+    FALSE
+{% endmacro %}
+```
+
+Next, we implement the test macro, see `test/no_nulls_in_dim_listings.sql`:
+
+```sql
+{{ no_nulls_in_columns(ref('dim_listings_clean')) }}
+```
+
+### Custom Generic Tests
+
+"A macro with a special signature, called in our yml files."
+
+Here we created a generic test using a macro. Which checks that the given column from model contains positive values. 
+
+```jinja
+
+{% test positive_value(model, column_name) %}
+SELECT
+    *
+FROM
+    {{ model }}
+WHERE
+    {{ column_name}} < 1
+{% endtest %}
+```
+
+To implement this macro we referenced it in our `schema.yml` file:
+
+```yml
+- name: minimum_nights
+        description: '{{ doc("dim_listing_clean__minimum_nights") }}'
+        tests:
+          - positive_value
+```
+
+The `(model, column_name)` is what makes this generic. We can add this test to any column in our `schema.yml` file and the `(model, column_name)` will be filled in automatically. Again here, we are returning the rows that break this test in our WHERE clause.
+
+## Installing 3rd Party Packages
+
+[dbt package hub](https://hub.getdbt.com/)
+
+Two step installation:
+
+1. add package to `packages.yml`
+2. run `dbt deps`
+
+An example of using `dbt-utils` is creating a primary key. In our `fct_reviews.sql` file we added:
+
+```sql
+SELECT 
+  {{ dbt_utils.generate_surrogate_key(['listing_id', 'review_date', 'reviewer_name', 'review_text']) }}
+    AS review_id,
+```
+
+It is common to have to do a full refresh using `dbt run --full-refresh --select <model>` in order to avoid `on_schema_change=fail` errors.
+
+## Documentation
+
+### Writing and Exploring Documentation
+
+Documentation can be added to various `yml` files such as:
+
+* `schema.yml`
+* `sources.yml`
+* `tests`
+
+The documentation property is most often called `description` and is added like this:
+
+```yml
+models:
+  - name: dim_listings_clean
+    description: Cleansed table which contains Airbnb listings.
+```
+
+
+Once you've added documentation, you generate using `dbt docs generate` and to serve via lightweight server we use `dbt docs serve`. 
+
+
+### Creating your own docs.md
+
+We created our own docs.md file for `minimum_nights` and reference the doc key when applying this documentation to our `.yml` files.
+
+```markdown
+{% docs dim_listing_clean__minimum_nights %}
+Minimum number of nights required to rent this property.
+
+Keep in mind that old listings might have `minimum_nights` set
+to 0 in the source tables. Our cleansing algorithm updates this to `1`.
+
+{% enddocs %}
+
+```
+
+```yml
+- name: minimum_nights
+        description: '{{ doc("dim_listing_clean__minimum_nights") }}'
+        tests:
+          - positive_value
+
+```
+
+### Viewing your Data Flow DAG
+
+You can only view your Lineage Graph - Data Flow DAG IF you have references between models. Otherwise you will only see standalone models.
+
+## Analyses
+
+SQL queries that don't produce models but can still leverage all of the dbt tools available like macros and packages.
+
+You can view the compiled sql by running `dbt compile` and then navigating to the `target/compile` directory.
+
+## Great Expectations Overview
+
