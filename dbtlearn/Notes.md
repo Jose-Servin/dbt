@@ -219,7 +219,7 @@ Next, we implement the test macro, see `test/no_nulls_in_dim_listings.sql`:
 
 "A macro with a special signature, called in our yml files."
 
-Here we created a generic test using a macro. Which checks that the given column from model contains positive values. 
+Here we created a generic test using a macro. Which checks that the given column from model contains positive values.
 
 ```jinja
 
@@ -281,9 +281,7 @@ models:
     description: Cleansed table which contains Airbnb listings.
 ```
 
-
-Once you've added documentation, you generate using `dbt docs generate` and to serve via lightweight server we use `dbt docs serve`. 
-
+Once you've added documentation, you generate using `dbt docs generate` and to serve via lightweight server we use `dbt docs serve`.
 
 ### Creating your own docs.md
 
@@ -320,3 +318,55 @@ You can view the compiled sql by running `dbt compile` and then navigating to th
 
 ## Great Expectations Overview
 
+[Official Doc](https://github.com/calogica/dbt-expectations)
+
+Implementation occurs in our `schema.yml` file:
+
+```yml
+  - name: dim_listings_w_hosts
+    tests:
+      - dbt_expectations.expect_table_row_count_to_equal_other_table:
+          compare_model: source('airbnb', 'listings')
+```
+
+
+Quantile Checks:
+
+```yml
+- name: dim_listings_w_hosts
+    tests:
+      - dbt_expectations.expect_table_row_count_to_equal_other_table:
+          compare_model: source('airbnb', 'listings')
+    columns:
+      - name: price
+        tests:
+          - dbt_expectations.expect_column_quantile_values_to_be_between:
+              quantile: .95
+              min_value: 50 # (Optional)
+              max_value: 500 # (Optional)
+
+```
+
+Testing Sources:
+
+We first add the test to our `sources.yml` 
+
+```yml
+sources:
+  - name: airbnb
+    schema: raw
+    tables:
+      - name: listings
+        identifier: raw_listings
+        columns:
+          - name: room_type
+            tests:
+              - dbt_expectations.expect_column_distinct_count_to_equal:
+                  value: 4
+```
+
+To execute, we use the `source:` tag:
+
+```terminal
+dbt test --select source:airbnb.listings
+```
