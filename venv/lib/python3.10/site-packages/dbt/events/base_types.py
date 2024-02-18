@@ -6,6 +6,7 @@ import sys
 from google.protobuf.json_format import ParseDict, MessageToDict, MessageToJson
 from google.protobuf.message import Message
 from dbt.events.helpers import get_json_string_utcnow
+from typing import Optional
 
 if sys.version_info >= (3, 8):
     from typing import Protocol
@@ -36,7 +37,7 @@ def get_pid() -> int:
     return os.getpid()
 
 
-# in theory threads can change so we don't cache them.
+# in theory threads can change, so we don't cache them.
 def get_thread_name() -> str:
     return threading.current_thread().name
 
@@ -54,7 +55,7 @@ class EventLevel(str, Enum):
 class BaseEvent:
     """BaseEvent for proto message generated python events"""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         class_name = type(self).__name__
         msg_cls = getattr(types_pb2, class_name)
         if class_name == "Formatting" and len(args) > 0:
@@ -99,9 +100,12 @@ class BaseEvent:
             self.pb_msg, preserving_proto_field_name=True, including_default_value_fields=True
         )
 
-    def to_json(self):
+    def to_json(self) -> str:
         return MessageToJson(
-            self.pb_msg, preserving_proto_field_name=True, including_default_valud_fields=True
+            self.pb_msg,
+            preserving_proto_field_name=True,
+            including_default_value_fields=True,
+            indent=None,
         )
 
     def level_tag(self) -> EventLevel:
@@ -126,7 +130,7 @@ class EventMsg(Protocol):
     data: Message
 
 
-def msg_from_base_event(event: BaseEvent, level: EventLevel = None):
+def msg_from_base_event(event: BaseEvent, level: Optional[EventLevel] = None):
 
     msg_class_name = f"{type(event).__name__}Msg"
     msg_cls = getattr(types_pb2, msg_class_name)

@@ -19,7 +19,7 @@ class ConfiguredContext(TargetContext):
         super().__init__(config.to_target_dict(), config.cli_vars)
         self.config = config
 
-    @contextproperty
+    @contextproperty()
     def project_name(self) -> str:
         return self.config.project_name
 
@@ -52,10 +52,11 @@ class ConfiguredVar(Var):
         adapter_type = self._config.credentials.type
         lookup = FQNLookup(self._project_name)
         active_vars = self._config.vars.vars_for(lookup, adapter_type)
-        all_vars = MultiDict([active_vars])
 
+        all_vars = MultiDict()
         if self._config.project_name != my_config.project_name:
             all_vars.add(my_config.vars.vars_for(lookup, adapter_type))
+        all_vars.add(active_vars)
 
         if var_name in all_vars:
             return all_vars[var_name]
@@ -79,11 +80,11 @@ class SchemaYamlContext(ConfiguredContext):
         self._project_name = project_name
         self.schema_yaml_vars = schema_yaml_vars
 
-    @contextproperty
+    @contextproperty()
     def var(self) -> ConfiguredVar:
         return ConfiguredVar(self._ctx, self.config, self._project_name)
 
-    @contextmember
+    @contextmember()
     def env_var(self, var: str, default: Optional[str] = None) -> str:
         return_value = None
         if var.startswith(SECRET_ENV_PREFIX):
@@ -112,13 +113,15 @@ class MacroResolvingContext(ConfiguredContext):
     def __init__(self, config):
         super().__init__(config)
 
-    @contextproperty
+    @contextproperty()
     def var(self) -> ConfiguredVar:
         return ConfiguredVar(self._ctx, self.config, self.config.project_name)
 
 
 def generate_schema_yml_context(
-    config: AdapterRequiredConfig, project_name: str, schema_yaml_vars: SchemaYamlVars = None
+    config: AdapterRequiredConfig,
+    project_name: str,
+    schema_yaml_vars: Optional[SchemaYamlVars] = None,
 ) -> Dict[str, Any]:
     ctx = SchemaYamlContext(config, project_name, schema_yaml_vars)
     return ctx.to_dict()

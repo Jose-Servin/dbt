@@ -2,7 +2,6 @@ import functools
 from typing import NoReturn
 
 from dbt.events.functions import warn_or_error
-from dbt.events.helpers import env_secrets, scrub_secrets
 from dbt.events.types import JinjaLogWarning
 
 from dbt.exceptions import (
@@ -25,6 +24,9 @@ from dbt.exceptions import (
     RelationWrongTypeError,
     ContractError,
     ColumnTypeMissingError,
+    FailFastError,
+    scrub_secrets,
+    env_secrets,
 )
 
 
@@ -107,6 +109,10 @@ def column_type_missing(column_names) -> NoReturn:
     raise ColumnTypeMissingError(column_names)
 
 
+def raise_fail_fast_error(msg, node=None) -> NoReturn:
+    raise FailFastError(msg, node=node)
+
+
 # Update this when a new function should be added to the
 # dbt context's `exceptions` key!
 CONTEXT_EXPORTS = {
@@ -131,6 +137,7 @@ CONTEXT_EXPORTS = {
         relation_wrong_type,
         raise_contract_error,
         column_type_missing,
+        raise_fail_fast_error,
     ]
 }
 

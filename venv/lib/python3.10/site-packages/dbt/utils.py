@@ -16,9 +16,16 @@ import time
 from pathlib import PosixPath, WindowsPath
 
 from contextlib import contextmanager
-from dbt.exceptions import ConnectionError, DuplicateAliasError
-from dbt.events.functions import fire_event
+
 from dbt.events.types import RetryExternalCall, RecordRetryException
+from dbt.exceptions import (
+    ConnectionError,
+    DbtInternalError,
+    DbtConfigError,
+    DuplicateAliasError,
+    RecursionError,
+)
+from dbt.helper_types import WarnErrorOptions
 from dbt import flags
 from enum import Enum
 from typing_extensions import Protocol
@@ -39,8 +46,6 @@ from typing import (
     Set,
     Sequence,
 )
-
-import dbt.exceptions
 
 DECIMALS: Tuple[Type[Any], ...]
 try:
@@ -93,13 +98,13 @@ DOCS_PREFIX = "dbt_docs__"
 
 def get_dbt_macro_name(name):
     if name is None:
-        raise dbt.exceptions.DbtInternalError("Got None for a macro name!")
+        raise DbtInternalError("Got None for a macro name!")
     return f"{MACRO_PREFIX}{name}"
 
 
 def get_dbt_docs_name(name):
     if name is None:
-        raise dbt.exceptions.DbtInternalError("Got None for a doc name!")
+        raise DbtInternalError("Got None for a doc name!")
     return f"{DOCS_PREFIX}{name}"
 
 
@@ -185,7 +190,7 @@ def _deep_map_render(
     value: Any,
     keypath: Tuple[Union[str, int], ...],
 ) -> Any:
-    atomic_types: Tuple[Type[Any], ...] = (int, float, str, type(None), bool)
+    atomic_types: Tuple[Type[Any], ...] = (int, float, str, type(None), bool, datetime.date)
 
     ret: Any
 
@@ -198,7 +203,7 @@ def _deep_map_render(
     else:
         container_types: Tuple[Type[Any], ...] = (list, dict)
         ok_types = container_types + atomic_types
-        raise dbt.exceptions.DbtConfigError(
+        raise DbtConfigError(
             "in _deep_map_render, expected one of {!r}, got {!r}".format(ok_types, type(value))
         )
 
@@ -229,12 +234,12 @@ def deep_map_render(func: Callable[[Any, Tuple[Union[str, int], ...]], Any], val
         return _deep_map_render(func, value, ())
     except RuntimeError as exc:
         if "maximum recursion depth exceeded" in str(exc):
-            raise dbt.exceptions.RecursionError("Cycle detected in deep_map_render")
+            raise RecursionError("Cycle detected in deep_map_render")
         raise
 
 
 class AttrDict(dict):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.__dict__ = self
 
@@ -279,9 +284,9 @@ class memoized:
 
     Taken from https://wiki.python.org/moin/PythonDecoratorLibrary#Memoize"""
 
-    def __init__(self, func):
+    def __init__(self, func) -> None:
         self.func = func
-        self.cache = {}
+        self.cache: Dict[Any, Any] = {}
 
     def __call__(self, *args):
         if not isinstance(args, collections.abc.Hashable):
@@ -337,15 +342,18 @@ class JSONEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, DECIMALS):
             return float(obj)
-        if isinstance(obj, (datetime.datetime, datetime.date, datetime.time)):
+        elif isinstance(obj, (datetime.datetime, datetime.date, datetime.time)):
             return obj.isoformat()
-        if isinstance(obj, jinja2.Undefined):
+        elif isinstance(obj, jinja2.Undefined):
             return ""
-        if hasattr(obj, "to_dict"):
+        elif isinstance(obj, Exception):
+            return repr(obj)
+        elif hasattr(obj, "to_dict"):
             # if we have a to_dict we should try to serialize the result of
             # that!
             return obj.to_dict(omit_none=True)
-        return super().default(obj)
+        else:
+            return super().default(obj)
 
 
 class ForgivingJSONEncoder(JSONEncoder):
@@ -359,7 +367,7 @@ class ForgivingJSONEncoder(JSONEncoder):
 
 
 class Translator:
-    def __init__(self, aliases: Mapping[str, str], recursive: bool = False):
+    def __init__(self, aliases: Mapping[str, str], recursive: bool = False) -> None:
         self.aliases = aliases
         self.recursive = recursive
 
@@ -389,9 +397,7 @@ class Translator:
             return self.translate_mapping(value)
         except RuntimeError as exc:
             if "maximum recursion depth exceeded" in str(exc):
-                raise dbt.exceptions.RecursionError(
-                    "Cycle detected in a value passed to translate!"
-                )
+                raise RecursionError("Cycle detected in a value passed to translate!")
             raise
 
 
@@ -415,6 +421,7 @@ def translate_aliases(
 
 # Note that this only affects hologram json validation.
 # It has no effect on mashumaro serialization.
+# Q: Can this be removed?
 def restrict_to(*restrictions):
     """Create the metadata for a restricted dataclass field"""
     return {"restrict": list(restrictions)}
@@ -450,7 +457,7 @@ def lowercase(value: Optional[str]) -> Optional[str]:
 
 
 class classproperty(object):
-    def __init__(self, func):
+    def __init__(self, func) -> None:
         self.func = func
 
     def __get__(self, obj, objtype):
@@ -601,8 +608,12 @@ def _connection_exception_retry(fn, max_attempts: int, attempt: int = 0):
     except (
         requests.exceptions.RequestException,
         ReadError,
+        EOFError,
     ) as exc:
         if attempt <= max_attempts - 1:
+            # This import needs to be inline to avoid circular dependency
+            from dbt.events.functions import fire_event
+
             fire_event(RecordRetryException(exc=str(exc)))
             fire_event(RetryExternalCall(attempt=attempt, max=max_attempts))
             time.sleep(1)
@@ -652,6 +663,9 @@ def args_to_dict(args):
         # this was required for a test case
         if isinstance(var_args[key], PosixPath) or isinstance(var_args[key], WindowsPath):
             var_args[key] = str(var_args[key])
+        if isinstance(var_args[key], WarnErrorOptions):
+            var_args[key] = var_args[key].to_dict()
+
         dict_args[key] = var_args[key]
     return dict_args
 
